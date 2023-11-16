@@ -4,3 +4,5 @@ logs/
 *.pyc
 *.json
 *.txt
+reviewer/*
+.env

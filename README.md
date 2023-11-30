@@ -34,3 +34,16 @@ You should get the following output:
 
 If you encounter any error, please first check the server log and then open an issue.
 
+## Usage Docker
+
+```bash
+sudo docker build -t llm-reviewer .
+```
+
+```bash
+sudo docker images
+```
+
+```bash
+sudo docker run -p 7799:7799 llm-reviewer
+```

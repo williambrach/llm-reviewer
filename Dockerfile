@@ -1,4 +1,4 @@
-FROM python:3.9
+FROM python:3.12
 
 WORKDIR /workspace
 ADD requirements.txt app.py /workspace/

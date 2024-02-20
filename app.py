@@ -234,11 +234,11 @@ def process_pdf(
 with gr.Blocks(css=".button {background-color: #4CAF50; color: white;}") as demo:
     # Title of the application
     gr.Markdown(
-        """# GPT-4 Paper Reviewer
+        """# Paper Reviewer
         This app uses OpenAI's GPT-4 model to generate a test review for your paper.
 
         * Upload **ONLY PDF** files.
-        * PDF File size limit is set to **5 MB**.
+        * PDF File size limit is set to **15 MB**.
         * Input size is limited by [OpenAI model](https://platform.openai.com/docs/models/gpt-4-and-gpt-4-turbo).
         * Maximum output token limit is 4096 tokens.
 

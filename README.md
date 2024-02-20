@@ -45,5 +45,14 @@ sudo docker images
 ```
 
 ```bash
-sudo docker run -p 7799:7799 llm-reviewer
+sudo docker run -d -p 7799:7799 llm-reviewer
 ```
+
+### Nginx
+
+```
+sudo vim /etc/nginx/sites-enabled/llmreview
+sudo systemctl reload nginx
+sudo systemctl restart nginx
+```
+

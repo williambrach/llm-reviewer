@@ -64,4 +64,4 @@ jobs:
         with:
           app-name: 'llm-reviewer'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_74B5D01CA82A4694BECD956FC53F2245 }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_36EAD753592A44ECBE7AC1FD394640E8 }}

@@ -30,7 +30,7 @@ Open http://0.0.0.0:7799 and upload your paper + enter OpenAI API key . The feed
 
 You should get the following output:
 
-![demo](/assets/demo.png)
+<!-- ![demo](/assets/demo.png) -->
 
 If you encounter any error, please first check the server log and then open an issue.
 

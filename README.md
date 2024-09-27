@@ -3,13 +3,13 @@
 ### Create env
 
 ```bash
-python -m venv reviewer
+conda create -n reviewer python=3.12
 ```
 
 ### Acitvate env
 
 ```bash
-source reviewer/bin/activate #linux/mac
+conda activate reviewer
 ```
 
 ### Install requirements

@@ -6,3 +6,5 @@ logs/
 *.txt
 reviewer/*
 .env
+*.ipynb
+.DS_Store

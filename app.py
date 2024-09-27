@@ -3,16 +3,23 @@ import os
 import re
 
 import gradio as gr
-import tiktoken  # noqa: E402
+import requests
+import tiktoken
 from dotenv import load_dotenv
-from openai import OpenAI
+from litellm import completion
 from pdfminer.high_level import extract_text
+
+from logger import setup_logger
 
 load_dotenv()
 
-DEFAULT_AGENT_CONTEXT = """Your task now is to draft a high-quality review outline for a top-tier Machine Learning (ML) conference for a submission."""
+API_KEY = os.getenv("API_KEY")
 
-DEFAULT_AGENT_TASK = """Compose a high-quality peer review of an ML paper submitted to a top-tier ML conference on OpenReview.
+LITELLM_URL = os.getenv("LITELLM_URL")
+
+DEFAULT_AGENT_CONTEXT = """Your task now is to draft a high-quality review outline for a top-tier {} {} for a submission."""
+
+DEFAULT_AGENT_TASK = """Compose a high-quality peer review of an paper submitted to a top-tier {} {} on OpenReview.
 Start by "Review outline:".
 And then:
 "1. Significance and novelty"
@@ -20,75 +27,13 @@ And then:
 "3. Potential reasons for rejection", List 4 key reasons. For each of 4 key reasons, use **>=2 sub bullet points** to further clarify and support your arguments in painstaking details.
 "4. Suggestions for improvement", List 4 key suggestions.
 
-Be thoughtful and constructive. Write Outlines only. 
+Be thoughtful and constructive. Write Outlines only.
 """
 
-OPEN_AI_KEY = "" if "OPEN_AI_KEY" not in os.environ else os.environ["OPEN_AI_KEY"]
+TOKENIZER = tiktoken.encoding_for_model("gpt-4o")
 
-class GPT4Wrapper:
-    def __init__(self, model_name: str, api_key: str) -> None:
-        """
-        Initialize the GPT4Wrapper class with the specified model name and API key.
-        :param model_name: Name of the GPT model to be used.
-        :param api_key: API key for authentication with OpenAI.
-        """
-        self.model_name = model_name
-        # Initialize tokenizer for the specified model
-        self.tokenizer = tiktoken.encoding_for_model(self.model_name)
-        self.client = OpenAI(api_key=api_key)
-        # Set the OpenAI API key
-
-    def make_query_args(self, user_str: str, n_query: int = 1) -> dict:
-        """
-        Prepare the arguments for the GPT query.
-        :param user_str: User input string to be processed by GPT.
-        :param n_query: Number of responses to generate (default is 1).
-        :return: A dictionary containing the query parameters.
-        """
-        # Construct the arguments for the query
-        query_args = {
-            "model": self.model_name,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are ChatGPT, a large language model trained by OpenAI. Answer as concisely as possible.",
-                },
-                {"role": "user", "content": user_str},
-            ],
-            "n": n_query,
-        }
-        return query_args
-
-    def compute_num_tokens(self, user_str: str) -> int:
-        """
-        Compute the number of tokens in the user input string.
-        :param user_str: User input string.
-        :return: Number of tokens in the user input.
-        """
-        # Encode the user string and count the tokens
-        return len(self.tokenizer.encode(user_str))
-
-    def send_query(self, user_str: str, n_query: int = 1) -> tuple:
-        """
-        Send a query to the GPT model and return the response.
-        :param user_str: User input string to query the model.
-        :param n_query: Number of responses to generate (default is 1).
-        :return: Tuple containing the model's response and token usage information.
-        """
-        # Display the number of tokens in the user string
-        print(f"# tokens sent to GPT: {self.compute_num_tokens(user_str)}")
-        # Generate the query arguments
-        query_args = self.make_query_args(user_str, n_query)
-        # Send the query to the model and get the response
-        completion = self.client.chat.completions.create(**query_args)
-        # Extract token usage information
-        prompt_tokens, completion_tokens = (
-            completion.usage.prompt_tokens,
-            completion.usage.completion_tokens,
-        )
-        # Extract the response content
-        result = completion.choices[0].message.content
-        return result, prompt_tokens, completion_tokens
+logger = setup_logger("LLM-Reviewer")
+logger.info("Logger setup done")
 
 
 def create_prompt(instruction: str, task: str, paper: str) -> str:
@@ -111,6 +56,10 @@ def create_prompt(instruction: str, task: str, paper: str) -> str:
     {task}
     """
     return text_to_send
+
+
+def get_number_of_tokens(text: str) -> int:
+    return len(TOKENIZER.encode(text))
 
 
 def parse_pdf_text(text: str) -> str:
@@ -159,88 +108,180 @@ def parse_pdf_text(text: str) -> str:
     return cleaned_text
 
 
-model_pricing = {
-    "gpt-4-0125-preview": {"input": 0.01, "output": 0.03},
-    "gpt-4-1106-preview": {"input": 0.01, "output": 0.03},
-    "default" : {"input": 0.01, "output": 0.03}
-}
+def get_completion(prompt: str, model_name: str = "gpt-4o-mini") -> str:
+    try:
+        response = completion(
+            model=model_name,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            api_key=API_KEY,
+            base_url=LITELLM_URL,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"Error in getting completion: {e}")
+        return str(e)
+
+
+def calculate_prompt_cost(
+    prompt: str, completion: str, model_name: str = "gpt-4o-mini"
+) -> float:
+    model_dict = {
+        "gpt-4o": {
+            "max_tokens": 4096,
+            "max_input_tokens": 128000,
+            "max_output_tokens": 4096,
+            "input_cost_per_token": 0.000005,
+            "output_cost_per_token": 0.000015,
+            "litellm_provider": "openai",
+            "mode": "chat",
+            "supports_function_calling": True,
+            "supports_parallel_function_calling": True,
+            "supports_vision": True,
+        },
+        "gpt-4o-mini": {
+            "max_tokens": 16384,
+            "max_input_tokens": 128000,
+            "max_output_tokens": 16384,
+            "input_cost_per_token": 0.00000015,
+            "output_cost_per_token": 0.00000060,
+            "litellm_provider": "openai",
+            "mode": "chat",
+            "supports_function_calling": True,
+            "supports_parallel_function_calling": True,
+            "supports_vision": True,
+        },
+        "o1-mini": {
+            "max_tokens": 65536,
+            "max_input_tokens": 128000,
+            "max_output_tokens": 65536,
+            "input_cost_per_token": 0.000003,
+            "output_cost_per_token": 0.000012,
+            "litellm_provider": "openai",
+            "mode": "chat",
+            "supports_function_calling": True,
+            "supports_parallel_function_calling": True,
+            "supports_vision": True,
+        },
+        "o1-preview": {
+            "max_tokens": 32768,
+            "max_input_tokens": 128000,
+            "max_output_tokens": 32768,
+            "input_cost_per_token": 0.000015,
+            "output_cost_per_token": 0.000060,
+            "litellm_provider": "openai",
+            "mode": "chat",
+            "supports_function_calling": True,
+            "supports_parallel_function_calling": True,
+            "supports_vision": True,
+        },
+    }
+
+    costs = model_dict.get(model_name, "gpt-4o-mini")
+    prompt_tokens = get_number_of_tokens(prompt)
+    completion_tokens = get_number_of_tokens(completion)
+
+    # Print token information for analysis
+    logger.info(f"{model_name} -> tokens in prompt: {prompt_tokens}")
+    logger.info(f"{model_name} -> tokens in completion: {completion_tokens}")
+
+    prompt_cost = prompt_tokens * costs["input_cost_per_token"]
+    completion_cost = completion_tokens * costs["output_cost_per_token"]
+    total_cost = prompt_cost + completion_cost
+    return round(total_cost, 4)
 
 
 def process_pdf(
     file_content: object,
-    api_key: str,
-    agent_context: str,
-    agent_tasks: str,
-    model_name: str = "gpt-4-1106-preview",
+    type_of_paper: list,
+    agent_task: str,
+    type_of_event: str,
+    model_name: str,
 ) -> tuple:
-    """
-    Processes a PDF file using a GPT-4 model to generate a review and calculate the price per request.
+    try:
+        with io.BytesIO(file_content) as pdf_file:
+            text = extract_text(pdf_file)
+            text = parse_pdf_text(text)
 
-    :param file_content: The content of the PDF file.
-    :param api_key: The API key for the GPT-4 model.
-    :param agent_context: The context for the GPT-4 agent.
-    :param agent_tasks: The tasks for the GPT-4 agent.
-    :return: A tuple containing the review generated by the model and the price markdown text.
-    """
-    # Initialize the GPT-4 wrapper
-    wrapper = GPT4Wrapper(model_name=model_name, api_key=api_key)
+        logger.info(f"PDF processed - {model_name}")
+        if len(type_of_paper) == 0:
+            type_of_paper = ["Conference"]
 
-    # Read and extract text from the PDF file
-    with io.BytesIO(file_content) as pdf_file:
-        text = extract_text(pdf_file)
-        text = parse_pdf_text(text)
+        type_of_paper = ", ".join(type_of_paper)
 
-    # Create a prompt for the GPT-4 model
-    prompt = create_prompt(agent_context, agent_tasks, text)
+        logger.info(f"Creating review for {type_of_paper} on topic {type_of_event}")
 
-    # Send the prompt to the GPT-4 model and receive the response
-    review, prompt_tokens, completion_tokens = wrapper.send_query(prompt)
+        agent_context = DEFAULT_AGENT_CONTEXT.format(type_of_event, type_of_paper)
+        agent_tasks = agent_task.format(type_of_event, type_of_paper)
 
-    # Print token information for analysis
-    print(f"# tokens in prompt: {prompt_tokens}")
-    print(f"# tokens in completion: {completion_tokens}")
+        logger.info(agent_tasks)
 
-    # Calculate the price per request based on token count
-    # Pricing: $0.01 per 1000 tokens for prompt, $0.03 per 1000 tokens for completion
+        logger.info(agent_context)
 
-    pricing_model = model_pricing.get(model_name, model_pricing["default"])
-    input_price_per_1k = pricing_model["input"]
-    output_price_per_1k = pricing_model["output"]
+        prompt = create_prompt(agent_context, agent_tasks, text)
 
-    price_per_request = (prompt_tokens / 1000 * input_price_per_1k) + (
-        completion_tokens / 1000 * output_price_per_1k
-    )
-    price_per_request = round(price_per_request, 2)
-    print(f"Price per request: {price_per_request} EUR")
+        logger.info(f"Prompt done - {model_name}")
 
-    # Generate a markdown string with the price information
-    price_markdown = f"""
+        review = get_completion(prompt, model_name)
 
-    ### Number of input tokens: {prompt_tokens}
-    ### Number of completion tokens: {completion_tokens}
-    ### Price per request: {price_per_request} EUR
-    {prompt_tokens} / 1000 * {input_price_per_1k} EUR + {completion_tokens} / 1000 * {output_price_per_1k} EUR
-    """
-    if prompt_tokens > 127000:
-        price_markdown += """
-        Warning: The number of tokens in the prompt exceeds the maximum of tokens.
-        The response may be truncated or the request may fail.
+        logger.info(f"Review done - {model_name}")
+
+        price_per_request = calculate_prompt_cost(prompt, review, model_name)
+
+        price_markdown = f"""
+        #### Price per request: {price_per_request} USD
         """
+
+    except Exception as e:
+        logger.error(f"Error in processing PDF: {e}")
+        review = str(e)
+        price_markdown = "Error in processing PDF"
 
     return review, price_markdown
 
+
+def get_models() -> list:
+    url = "http://147.175.151.44/models"
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"}
+
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()  # Raises an HTTPError for bad responses
+        models = response.json()
+        models = [model["id"] for model in models["data"]]
+        return models
+    except requests.exceptions.RequestException as e:
+        print(f"An error occurred: {e}")
+        return None
+
+
+drop_down_models = get_models()
+drop_down_models = drop_down_models if drop_down_models is not None else ["gpt-4o-mini"]
+
+event_types = [
+    "Machine Learning (ML)",
+    "Blockchain",
+    "Telecommunication",
+    "Security",
+    "Computer Vision",
+    "Natural Language Processing",
+    "Robotics",
+    "Artificial Intelligence",
+]
 
 # Set up the GUI layout with custom CSS for buttons
 with gr.Blocks(css=".button {background-color: #4CAF50; color: white;}") as demo:
     # Title of the application
     gr.Markdown(
-        """# Paper Reviewer
-        This app uses OpenAI's GPT-4 model to generate a test review for your paper.
+        """# Paper Reviewer - 0.0.2
+        This app uses LLM model to generate a **test** review for your paper.
 
         * Upload **ONLY PDF** files.
-        * PDF File size limit is set to **15 MB**.
-        * Input size is limited by [OpenAI model](https://platform.openai.com/docs/models/gpt-4-and-gpt-4-turbo).
-        * Maximum output token limit is 4096 tokens.
+        * Please leave feedback on the generated review (teams or mail).
 
         For more details, check out the
         [github repository](https://github.com/williambrach/llm-reviewer)."""
@@ -250,31 +291,43 @@ with gr.Blocks(css=".button {background-color: #4CAF50; color: white;}") as demo
     with gr.Row():
         # Left column for input components
         with gr.Column():
-            gr.Markdown("## Agent Configuration / Input")
+            gr.Markdown("## Research paper")
+            # File upload component for PDFs
+            upload_component = gr.File(
+                label="PDF to be reviewed", type="binary", value=None
+            )
+
+            gr.Markdown("## Configuration")
 
             # select model
             drop_down = gr.Dropdown(
-                ["gpt-4-0125-preview", "gpt-4-1106-preview"],
-                label="OpenAI models",
-                info="GPT model for creating the review.",
-            )
-
-            # Textbox for entering the OpenAI API key
-            api_key = gr.Textbox(
-                label="OpenAI API Key",
-                info="Paste your OpenAI API key here.",
-                placeholder="Enter your OpenAI API key here...",
-                lines=1,
-                value=OPEN_AI_KEY,
+                drop_down_models,
+                label="LLM Model",
+                info="Model for creating the review.",
+                value=drop_down_models[0],
             )
 
             # Textbox for entering the context for the review agent
-            agent_context = gr.Textbox(
-                label="Reviewer-Agent Context",
-                info="Agent context / persona for the review.",
-                placeholder="Enter context for the agent...",
-                lines=5,
-                value=DEFAULT_AGENT_CONTEXT,
+            # agent_context = gr.Textbox(
+            #     label="Reviewer-Agent Context",
+            #     info="Agent context / persona for the review.",
+            #     placeholder="Enter context for the agent...",
+            #     lines=5,
+            #     value=DEFAULT_AGENT_CONTEXT,
+            # )
+
+            agent_context = gr.CheckboxGroup(
+                ["Conference", "Journal", "White paper"],
+                label="Type of paper",
+                value=["Conference"],
+                info="Type of paper",
+            )
+
+            event = gr.Dropdown(
+                event_types,
+                label="Type of conference/journal",
+                info="What type of conference/journal is the paper for?",
+                value=event_types[0],
             )
 
             # Textbox for entering the tasks for the review agent
@@ -286,31 +339,28 @@ with gr.Blocks(css=".button {background-color: #4CAF50; color: white;}") as demo
                 value=DEFAULT_AGENT_TASK,
             )
 
-            # File upload component for PDFs
-            upload_component = gr.File(
-                label="PDF to be reviewed",
-                type="binary",
-            )
-
             # Button to trigger the review creation process
             process_button = gr.Button("Create Review", variant="primary")
 
         # Right column for output components
         with gr.Column():
-            gr.Markdown("## Generated Review / Metadata")
+            gr.Markdown("## Metadata")
 
             # Placeholder for the price markdown output
             price_markdown = gr.Markdown("###")
 
-            # Textbox for displaying the review output
-            processed_output = gr.Textbox(label="Review", lines=30)
+            gr.Markdown(
+                "----------------------------------------------------------------"
+            )
+            gr.Markdown("## Generated Review ")
+            processed_output = gr.Markdown(label="Review")
 
         # Link the button to the processing function
         process_button.click(
-            process_pdf,
-            inputs=[upload_component, api_key, agent_context, agent_tasks, drop_down],
+            fn=process_pdf,
+            inputs=[upload_component, agent_context, agent_tasks, event, drop_down],
             outputs=[processed_output, price_markdown],
         )
 
-
-demo.launch(server_name="0.0.0.0", server_port=7799, share=False)
+if __name__ == "__main__":
+    demo.launch(server_name="0.0.0.0", server_port=7799)

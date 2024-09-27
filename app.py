@@ -218,10 +218,6 @@ def process_pdf(
         agent_context = DEFAULT_AGENT_CONTEXT.format(type_of_event, type_of_paper)
         agent_tasks = agent_task.format(type_of_event, type_of_paper)
 
-        logger.info(agent_tasks)
-
-        logger.info(agent_context)
-
         prompt = create_prompt(agent_context, agent_tasks, text)
 
         logger.info(f"Prompt done - {model_name}")

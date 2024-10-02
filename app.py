@@ -267,6 +267,7 @@ event_types = [
     "Natural Language Processing",
     "Robotics",
     "Artificial Intelligence",
+    "Computer Science Education",
 ]
 
 # Set up the GUI layout with custom CSS for buttons
@@ -359,4 +360,4 @@ with gr.Blocks(css=".button {background-color: #4CAF50; color: white;}") as demo
         )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7799)
+    demo.launch(server_name="0.0.0.0", server_port=7799, share=False)

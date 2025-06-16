@@ -179,6 +179,18 @@ def calculate_prompt_cost(
             "supports_parallel_function_calling": True,
             "supports_vision": True,
         },
+        "o3-mini": {
+            "max_tokens": 65536,
+            "max_input_tokens": 128000,
+            "max_output_tokens": 65536,
+            "input_cost_per_token":0.0000011,
+            "output_cost_per_token": 0.0000044,
+            "litellm_provider": "openai",
+            "mode": "chat",
+            "supports_function_calling": True,
+            "supports_parallel_function_calling": True,
+            "supports_vision": True,
+        },
     }
 
     costs = model_dict.get(model_name, "gpt-4o-mini")
@@ -235,6 +247,7 @@ def process_pdf(
     except Exception as e:
         logger.error(f"Error in processing PDF: {e}")
         review = str(e)
+        print(review)
         price_markdown = "Error in processing PDF"
 
     return review, price_markdown

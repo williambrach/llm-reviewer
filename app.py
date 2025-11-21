@@ -7,7 +7,7 @@ import requests
 import tiktoken
 from dotenv import load_dotenv
 from litellm import completion
-from pdfminer.high_level import extract_text
+from markitdown import MarkItDown
 
 from logger import setup_logger
 
@@ -15,7 +15,8 @@ load_dotenv()
 
 API_KEY = os.getenv("API_KEY")
 
-LITELLM_URL = os.getenv("LITELLM_URL")
+BASE_URL = os.getenv("API_BASE")
+
 
 DEFAULT_AGENT_CONTEXT = """Your task now is to draft a high-quality review outline for a top-tier {} {} for a submission."""
 
@@ -31,6 +32,8 @@ Be thoughtful and constructive. Write Outlines only.
 """
 
 TOKENIZER = tiktoken.encoding_for_model("gpt-4o")
+
+MD = MarkItDown(enable_plugins=False)  # Set to True to enable plu
 
 logger = setup_logger("LLM-Reviewer")
 logger.info("Logger setup done")
@@ -108,8 +111,14 @@ def parse_pdf_text(text: str) -> str:
     return cleaned_text
 
 
-def get_completion(prompt: str, model_name: str = "gpt-4o-mini") -> str:
+def get_completion(prompt: str, model_name: str) -> str:
     try:
+        if "gpt" in model_name.lower():
+            model_name = f"openai/{model_name}"
+        elif "claude" in model_name.lower():
+            model_name = f"anthropic/{model_name}"
+        else:
+            model_name = model_name
         response = completion(
             model=model_name,
             messages=[
@@ -118,8 +127,10 @@ def get_completion(prompt: str, model_name: str = "gpt-4o-mini") -> str:
                     "content": prompt,
                 }
             ],
+            max_tokens=32_000,
+            # temperature=0,
             api_key=API_KEY,
-            base_url=LITELLM_URL,
+            base_url=BASE_URL,
         )
         return response.choices[0].message.content
     except Exception as e:
@@ -131,65 +142,25 @@ def calculate_prompt_cost(
     prompt: str, completion: str, model_name: str = "gpt-4o-mini"
 ) -> float:
     model_dict = {
-        "gpt-4o": {
-            "max_tokens": 4096,
-            "max_input_tokens": 128000,
-            "max_output_tokens": 4096,
-            "input_cost_per_token": 0.000005,
-            "output_cost_per_token": 0.000015,
-            "litellm_provider": "openai",
-            "mode": "chat",
-            "supports_function_calling": True,
-            "supports_parallel_function_calling": True,
-            "supports_vision": True,
+        "gpt-5.1-fiit": {
+            "input_cost_per_token": 0.00000125,
+            "output_cost_per_token": 0.00001,
         },
-        "gpt-4o-mini": {
-            "max_tokens": 16384,
-            "max_input_tokens": 128000,
-            "max_output_tokens": 16384,
-            "input_cost_per_token": 0.00000015,
-            "output_cost_per_token": 0.00000060,
-            "litellm_provider": "openai",
-            "mode": "chat",
-            "supports_function_calling": True,
-            "supports_parallel_function_calling": True,
-            "supports_vision": True,
-        },
-        "o1-mini": {
-            "max_tokens": 65536,
-            "max_input_tokens": 128000,
-            "max_output_tokens": 65536,
-            "input_cost_per_token": 0.000003,
-            "output_cost_per_token": 0.000012,
-            "litellm_provider": "openai",
-            "mode": "chat",
-            "supports_function_calling": True,
-            "supports_parallel_function_calling": True,
-            "supports_vision": True,
-        },
-        "o1-preview": {
-            "max_tokens": 32768,
-            "max_input_tokens": 128000,
-            "max_output_tokens": 32768,
+        "claude-opus-4.1-fiit": {
             "input_cost_per_token": 0.000015,
-            "output_cost_per_token": 0.000060,
-            "litellm_provider": "openai",
-            "mode": "chat",
-            "supports_function_calling": True,
-            "supports_parallel_function_calling": True,
-            "supports_vision": True,
+            "output_cost_per_token": 0.000075,
         },
-        "o3-mini": {
-            "max_tokens": 65536,
-            "max_input_tokens": 128000,
-            "max_output_tokens": 65536,
-            "input_cost_per_token":0.0000011,
-            "output_cost_per_token": 0.0000044,
-            "litellm_provider": "openai",
-            "mode": "chat",
-            "supports_function_calling": True,
-            "supports_parallel_function_calling": True,
-            "supports_vision": True,
+        "gpt-5-fiit": {
+            "input_cost_per_token": 0.00000125,
+            "output_cost_per_token": 0.00001,
+        },
+        "claude-sonnet-4.5-fiit": {
+            "input_cost_per_token": 0.000003,
+            "output_cost_per_token": 0.000015,
+        },
+        "gpt-4.1-fiit": {
+            "input_cost_per_token": 0.000002,
+            "output_cost_per_token": 0.000008,
         },
     }
 
@@ -215,8 +186,10 @@ def process_pdf(
     model_name: str,
 ) -> tuple:
     try:
+        # 2. Use convert_stream for in-memory bytes
         with io.BytesIO(file_content) as pdf_file:
-            text = extract_text(pdf_file)
+            result = MD.convert_stream(pdf_file, file_extension=".pdf")
+            text = result.text_content
             text = parse_pdf_text(text)
 
         logger.info(f"PDF processed - {model_name}")
@@ -247,14 +220,13 @@ def process_pdf(
     except Exception as e:
         logger.error(f"Error in processing PDF: {e}")
         review = str(e)
-        print(review)
         price_markdown = "Error in processing PDF"
 
     return review, price_markdown
 
 
 def get_models() -> list:
-    url = "http://147.175.151.44/models"
+    url = f"{BASE_URL}/v1/models"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"}
 
     try:
@@ -265,7 +237,7 @@ def get_models() -> list:
         return models
     except requests.exceptions.RequestException as e:
         print(f"An error occurred: {e}")
-        return None
+        return []
 
 
 drop_down_models = get_models()
@@ -287,7 +259,7 @@ event_types = [
 with gr.Blocks(css=".button {background-color: #4CAF50; color: white;}") as demo:
     # Title of the application
     gr.Markdown(
-        """# Paper Reviewer - 0.0.2
+        """# Paper Reviewer - 0.0.3
         This app uses LLM model to generate a **test** review for your paper.
 
         * Upload **ONLY PDF** files.
@@ -373,4 +345,6 @@ with gr.Blocks(css=".button {background-color: #4CAF50; color: white;}") as demo
         )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7799, share=False)
+    demo.launch(
+        server_name="0.0.0.0", server_port=7799, share=False, root_path="/reviewer"
+    )

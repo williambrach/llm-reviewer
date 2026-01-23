@@ -253,6 +253,10 @@ event_types = [
     "Robotics",
     "Artificial Intelligence",
     "Computer Science Education",
+    "Digital Circuit Design and Next Generation Chips",
+    "Verification and Test",
+    "Analog Circuit Design and Test",
+    "Emerging Technologies & Security"
 ]
 
 # Set up the GUI layout with custom CSS for buttons

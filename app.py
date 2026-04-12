@@ -230,14 +230,23 @@ def get_models() -> list:
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"}
 
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()  # Raises an HTTPError for bad responses
         models = response.json()
         models = [model["id"] for model in models["data"]]
         return models
     except requests.exceptions.RequestException as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"Error fetching models: {e}")
         return []
+
+
+def refresh_models(current_value: str) -> gr.Dropdown:
+    models = get_models()
+    if not models:
+        gr.Warning("Failed to refresh models — keeping current list.")
+        return gr.update()
+    selected = current_value if current_value in models else models[0]
+    return gr.Dropdown(choices=models, value=selected)
 
 
 drop_down_models = get_models()
@@ -346,6 +355,12 @@ with gr.Blocks(css=".button {background-color: #4CAF50; color: white;}") as demo
             fn=process_pdf,
             inputs=[upload_component, agent_context, agent_tasks, event, drop_down],
             outputs=[processed_output, price_markdown],
+        )
+
+        drop_down.focus(
+            fn=refresh_models,
+            inputs=[drop_down],
+            outputs=[drop_down],
         )
 
 if __name__ == "__main__":

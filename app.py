@@ -113,12 +113,11 @@ def parse_pdf_text(text: str) -> str:
 
 def get_completion(prompt: str, model_name: str) -> str:
     try:
-        if "gpt" in model_name.lower():
-            model_name = f"openai/{model_name}"
-        elif "claude" in model_name.lower():
-            model_name = f"anthropic/{model_name}"
-        else:
-            model_name = model_name
+        if "/" not in model_name:
+            if "claude" in model_name.lower():
+                model_name = f"anthropic/{model_name}"
+            else:
+                model_name = f"openai/{model_name}"
         response = completion(
             model=model_name,
             messages=[
@@ -146,13 +145,17 @@ def calculate_prompt_cost(
             "input_cost_per_token": 0.00000125,
             "output_cost_per_token": 0.00001,
         },
-        "claude-opus-4.1-fiit": {
-            "input_cost_per_token": 0.000015,
-            "output_cost_per_token": 0.000075,
+        "claude-opus-4.6-fiit": {
+            "input_cost_per_token": 0.000005,
+            "output_cost_per_token": 0.000025,
         },
         "gpt-5-fiit": {
             "input_cost_per_token": 0.00000125,
             "output_cost_per_token": 0.00001,
+        },
+        "gpt-5.4-fiit": {
+            "input_cost_per_token": 0.0000025,
+            "output_cost_per_token": 0.000015,
         },
         "claude-sonnet-4.5-fiit": {
             "input_cost_per_token": 0.000003,
@@ -164,7 +167,10 @@ def calculate_prompt_cost(
         },
     }
 
-    costs = model_dict.get(model_name, "gpt-4o-mini")
+    costs = model_dict.get(
+        model_name,
+        {"input_cost_per_token": 0.00000125, "output_cost_per_token": 0.00001},
+    )
     prompt_tokens = get_number_of_tokens(prompt)
     completion_tokens = get_number_of_tokens(completion)
 
@@ -342,13 +348,13 @@ with gr.Blocks(css=".button {background-color: #4CAF50; color: white;}") as demo
             gr.Markdown("## Metadata")
 
             # Placeholder for the price markdown output
-            price_markdown = gr.Markdown("###")
+            price_markdown = gr.Markdown("#### Price per request: –")
 
             gr.Markdown(
                 "----------------------------------------------------------------"
             )
             gr.Markdown("## Generated Review ")
-            processed_output = gr.Markdown(label="Review")
+            processed_output = gr.Markdown("*Waiting for input...*", label="Review")
 
         # Link the button to the processing function
         process_button.click(
